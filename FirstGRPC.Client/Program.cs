@@ -10,9 +10,7 @@ var options = new GrpcChannelOptions
 using var channel = GrpcChannel.ForAddress("http://localhost:5242", options);
 var client = new FirstServiceDefinition.FirstServiceDefinitionClient(channel);
 
-// Unary(client);
-// await ClientStreaming(client);
-await ServerStreaming(client);
+await BiDirectionalStreaming(client);
 return;
 
 static void Unary(FirstServiceDefinition.FirstServiceDefinitionClient client)
@@ -47,10 +45,17 @@ static async Task ServerStreaming(FirstServiceDefinition.FirstServiceDefinitionC
 static async Task BiDirectionalStreaming(FirstServiceDefinition.FirstServiceDefinitionClient client)
 {
     using var call = client.BiDirectionalStream();
-    for (var i = 0; i < 1_000; i++)
+    for (var i = 0; i < 10; i++)
     {
-        await call.RequestStream.WriteAsync(new Request { Content = i.ToString() });
-        await call.ResponseStream.MoveNext();
+        var request = new Request { Content = i.ToString() };
+        Console.WriteLine(request);
+        await call.RequestStream.WriteAsync(request);
+    }
+
+    while (await call.ResponseStream.MoveNext())
+    {
+        var message = call.ResponseStream.Current;
+        Console.WriteLine(message);
     }
 
     await call.RequestStream.CompleteAsync();
