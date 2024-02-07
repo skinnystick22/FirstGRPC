@@ -10,21 +10,24 @@ var options = new GrpcChannelOptions
 using var channel = GrpcChannel.ForAddress("http://localhost:5242", options);
 var client = new FirstServiceDefinition.FirstServiceDefinitionClient(channel);
 
-await BiDirectionalStreaming(client);
+await ServerStreaming(client);
 return;
 
 static void Unary(FirstServiceDefinition.FirstServiceDefinitionClient client)
 {
     var request = new Request { Content = "Hello" };
-    var response = client.Unary(request);
+    var response = client.Unary(request, deadline: DateTime.UtcNow.AddMilliseconds(3));
+
+    Console.WriteLine(response.Message);
 }
 
 static async Task ClientStreaming(FirstServiceDefinition.FirstServiceDefinitionClient client)
 {
-    using var call = client.ClientStream();
+    var cancellationTokenSource = new CancellationTokenSource();
+    using var call = client.ClientStream(cancellationToken: cancellationTokenSource.Token);
     for (var i = 0; i < 1_000; i++)
     {
-        await call.RequestStream.WriteAsync(new Request { Content = i.ToString() });
+        await call.RequestStream.WriteAsync(new Request { Content = i.ToString() }, cancellationTokenSource.Token);
     }
 
     await call.RequestStream.CompleteAsync();
@@ -35,24 +38,31 @@ static async Task ClientStreaming(FirstServiceDefinition.FirstServiceDefinitionC
 static async Task ServerStreaming(FirstServiceDefinition.FirstServiceDefinitionClient client)
 {
     var request = new Request { Content = "Hello" };
-    using var call = client.ServerStream(request);
-    await foreach (var response in call.ResponseStream.ReadAllAsync())
+    var cancellationTokenSource = new CancellationTokenSource();
+    using var call = client.ServerStream(request, cancellationToken: cancellationTokenSource.Token);
+    await foreach (var response in call.ResponseStream.ReadAllAsync(cancellationTokenSource.Token))
     {
+        if (string.Equals(response.Message, "2", StringComparison.InvariantCultureIgnoreCase))
+        {
+            cancellationTokenSource.Cancel();
+        }
         Console.WriteLine(response.Message);
     }
 }
 
 static async Task BiDirectionalStreaming(FirstServiceDefinition.FirstServiceDefinitionClient client)
 {
-    using var call = client.BiDirectionalStream();
+    var cancellationTokenSource = new CancellationTokenSource();
+
+    using var call = client.BiDirectionalStream(cancellationToken: cancellationTokenSource.Token);
     for (var i = 0; i < 10; i++)
     {
         var request = new Request { Content = i.ToString() };
         Console.WriteLine(request);
-        await call.RequestStream.WriteAsync(request);
+        await call.RequestStream.WriteAsync(request, cancellationTokenSource.Token);
     }
 
-    while (await call.ResponseStream.MoveNext())
+    while (await call.ResponseStream.MoveNext(cancellationTokenSource.Token))
     {
         var message = call.ResponseStream.Current;
         Console.WriteLine(message);
